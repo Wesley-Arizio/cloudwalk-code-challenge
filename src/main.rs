@@ -119,69 +119,87 @@ impl GameMatch {
     }
 }
 
-fn main() -> Result<(), String> {
-    let file = File::open("short.log").map_err(|e| e.to_string())?;
-    let reader = BufReader::new(file);
-    let mut games: Vec<GameMatch> = vec![];
-    let mut game = GameMatch::new();
-    for line in reader.lines() {
-        let line = line.map_err(|e| e.to_string())?;
+struct Game {
+    filename: String,
+}
 
-        if line.contains("---") {
-            continue;
-        }
-
-        if line.contains("InitGame") {
-            games.push(game);
-            game = GameMatch::new();
-            continue;
-        };
-
-        if !line.contains("Kill") {
-            continue;
-        }
-
-        let rest = line.split("killed").collect::<Vec<&str>>();
-        if rest.len() < 2 {
-            return Err(
-                "invalid format: there is no information about the killer or the player killed"
-                    .to_string(),
-            );
-        };
-
-        game.increase_total_kills();
-
-        let killer = rest[0]
-            .split(":")
-            .last()
-            .ok_or_else(|| "No killer found".to_string())?
-            .trim();
-
-        let killed = rest[1].split("by").collect::<Vec<&str>>();
-        if killed.len() < 2 {
-            return Err(
-                "invalid format: there is no information about player killed or the deaths mean"
-                    .to_string(),
-            );
-        }
-
-        let player_killed = killed[0].trim();
-        let mean = killed[1].trim();
-
-        game.add_player(player_killed);
-        game.increase_kill_by_mean(MeansOfDeath::try_from(mean)?);
-
-        if !killer.contains("<world>") {
-            game.add_player(killer);
-            game.increase_player_kills(killer)
-        } else {
-            game.decrease_player_kills(player_killed);
+impl Game {
+    pub fn new(filename: &str) -> Self {
+        Self {
+            filename: filename.to_string(),
         }
     }
 
-    // It inserts empty game history the first iteration
-    games.remove(0);
+    pub fn generate_report(&self) -> Result<Vec<GameMatch>, String> {
+        let file = File::open(&self.filename).map_err(|e| e.to_string())?;
+        let reader = BufReader::new(file);
+        let mut games: Vec<GameMatch> = vec![];
+        let mut game = GameMatch::new();
 
+        for (i, line) in reader.lines().enumerate() {
+            let line = line.map_err(|e| e.to_string())?;
+
+            // Verify if the new game is in the init of the file (avoid adding an empty game match to the history)
+            if line.contains("InitGame:") && i > 2 {
+                games.push(game);
+                game = GameMatch::new();
+                continue;
+            };
+
+            if !line.contains("Kill") || line.contains("---") {
+                continue;
+            }
+
+            let rest = line.split("killed").collect::<Vec<&str>>();
+            if rest.len() < 2 {
+                return Err(
+                    "invalid format: there is no information about the killer or the player killed"
+                        .to_string(),
+                );
+            };
+
+            game.increase_total_kills();
+
+            let killer = rest[0]
+                .split(":")
+                .last()
+                .ok_or_else(|| "No killer found".to_string())?
+                .trim();
+
+            let killed = rest[1].split("by").collect::<Vec<&str>>();
+            if killed.len() < 2 {
+                return Err(
+                    "invalid format: there is no information about player killed or the deaths mean"
+                        .to_string(),
+                );
+            }
+
+            let player_killed = killed[0].trim();
+            let mean = killed[1].trim();
+
+            game.add_player(player_killed);
+            game.increase_kill_by_mean(MeansOfDeath::try_from(mean)?);
+
+            if !killer.contains("<world>") {
+                game.add_player(killer);
+                game.increase_player_kills(killer)
+            } else {
+                game.decrease_player_kills(player_killed);
+            }
+        }
+
+        // Add last game to the history even it it wasn't finshed yet (in case the log file is over);
+        games.push(game);
+
+        Ok(games)
+    }
+}
+
+fn main() -> Result<(), String> {
+    let game = Game::new("qgames.log");
+
+    let report = game.generate_report()?;
+    println!("{:#?}", report);
     Ok(())
 }
 
