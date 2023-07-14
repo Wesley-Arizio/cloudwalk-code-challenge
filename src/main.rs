@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 
+use serde::{Deserialize, Serialize};
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 enum MeansOfDeath {
     ModUnknown,
     ModShotgun,
@@ -74,7 +75,7 @@ impl TryFrom<&str> for MeansOfDeath {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 struct GameMatch {
     pub total_kills: u32,
     pub players: Vec<String>,
@@ -130,7 +131,7 @@ impl Game {
         }
     }
 
-    pub fn generate_report(&self) -> Result<Vec<GameMatch>, String> {
+    pub fn generate_report(&self) -> Result<(), String> {
         let file = File::open(&self.filename).map_err(|e| e.to_string())?;
         let reader = BufReader::new(file);
         let mut games: Vec<GameMatch> = vec![];
@@ -191,15 +192,24 @@ impl Game {
         // Add last game to the history even it it wasn't finshed yet (in case the log file is over);
         games.push(game);
 
-        Ok(games)
+        Game::write_file(games)?;
+        Ok(())
+    }
+
+    fn write_file(data: Vec<GameMatch>) -> Result<(), String> {
+        let file = File::create("output.json").map_err(|e| e.to_string())?;
+        let mut writer = BufWriter::new(file);
+        serde_json::to_writer(&mut writer, &data).map_err(|e| e.to_string())?;
+        writer.flush().map_err(|e| e.to_string())?;
+
+        Ok(())
     }
 }
 
 fn main() -> Result<(), String> {
     let game = Game::new("qgames.log");
 
-    let report = game.generate_report()?;
-    println!("{:#?}", report);
+    game.generate_report()?;
     Ok(())
 }
 
